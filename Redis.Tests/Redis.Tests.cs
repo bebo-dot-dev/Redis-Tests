@@ -106,19 +106,22 @@ namespace Redis.Tests
             var t2 = subscriber2.SubscribeAsync(channelId, (_, msg) => { if (msg == "message") Interlocked.Increment(ref subscriber2Count); });
             await Task.WhenAll(t1, t2).ForAwait();
 
+            //act
             var publishCount = await pub.PublishAsync(channelId, "message");
-            publishCount.Should().Be(2);
             
+            //assert
+            publishCount.Should().Be(2);
             await AllowReasonableTimeToPublishAndProcess().ForAwait();
             Interlocked.CompareExchange(ref subscriber1Count, 0, 0).Should().Be(1);
             Interlocked.CompareExchange(ref subscriber2Count, 0, 0).Should().Be(1);
             
+            //act
             // unsubscribe the first subscriber
             await subscriber1.UnsubscribeAsync(channelId);
-            
             publishCount = await pub.PublishAsync(channelId, "message");
-            publishCount.Should().Be(1);
             
+            //assert
+            publishCount.Should().Be(1);
             await AllowReasonableTimeToPublishAndProcess().ForAwait();
             Interlocked.CompareExchange(ref subscriber1Count, 0, 0).Should().Be(1);
             Interlocked.CompareExchange(ref subscriber2Count, 0, 0).Should().Be(2);
