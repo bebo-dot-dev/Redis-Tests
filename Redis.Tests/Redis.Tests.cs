@@ -12,16 +12,16 @@ namespace Redis.Tests
         {
             //arrange
             var options = ConfigurationOptions.Parse(RedisTestHost);
-            await using var conn1 = await ConnectionMultiplexer.ConnectAsync(options);
-            var db1 = conn1.GetDatabase();
-            var key = GetUniqueKey("StreamReadAsync.Test");
+            await using var conn = await ConnectionMultiplexer.ConnectAsync(options);
+            var db = conn.GetDatabase();
+            var key = GetUniqueKey();
 
-            var id1 = await db1.StreamAddAsync(key, "field1", "value1");
-            var id2 = await db1.StreamAddAsync(key, "field2", "value2");
-            var id3 = await db1.StreamAddAsync(key, "field3", "value3");
+            var id1 = await db.StreamAddAsync(key, "field1", "value1");
+            var id2 = await db.StreamAddAsync(key, "field2", "value2");
+            var id3 = await db.StreamAddAsync(key, "field3", "value3");
 
             //act
-            var entries = await db1.StreamReadAsync(key, StreamPosition.Beginning);
+            var entries = await db.StreamReadAsync(key, StreamPosition.Beginning);
 
             //assert
             entries.Length.Should().Be(3);
@@ -37,7 +37,7 @@ namespace Redis.Tests
             var options = ConfigurationOptions.Parse(RedisTestHost);
             await using var conn1 = await ConnectionMultiplexer.ConnectAsync(options);
             var db1 = conn1.GetDatabase();
-            var key = GetUniqueKey("StreamReadGroupAsync.Test");
+            var key = GetUniqueKey();
             const string groupName = "test_group";
 
             var id1 = await db1.StreamAddAsync(key, "field1", "value1");
@@ -65,7 +65,7 @@ namespace Redis.Tests
             var db1 = conn1.GetDatabase();
             await using var conn2 = await ConnectionMultiplexer.ConnectAsync(options);
             var db2 = conn2.GetDatabase();
-            var key = GetUniqueKey("StreamReadGroupAsync.Test");
+            var key = GetUniqueKey();
             const string groupName = "test_group";
 
             var id1 = await db1.StreamAddAsync(key, "field1", "value1");
@@ -126,8 +126,59 @@ namespace Redis.Tests
             Interlocked.CompareExchange(ref subscriber1Count, 0, 0).Should().Be(1);
             Interlocked.CompareExchange(ref subscriber2Count, 0, 0).Should().Be(2);
         }
+        
+        [Test]
+        public async Task StreamReadAsync_WhenTwentyValuesAddedToStreamWithALimitOfTen_ExpectLastTenValuesReturned()
+        {
+            //arrange
+            var options = ConfigurationOptions.Parse(RedisTestHost);
+            await using var conn = await ConnectionMultiplexer.ConnectAsync(options);
+            var db = conn.GetDatabase();
+            var key = GetUniqueKey();
 
-        private static RedisKey GetUniqueKey(string type) => $"{type}_stream_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+            var redisValues = new List<RedisValue>();
+            for (var i = 0; i < 20; i++)
+            {
+                redisValues.Add(await db.StreamAddAsync(key, $"field{i}", $"value{i}", maxLength: 10));
+            }
+            
+            //act
+            var entries = await db.StreamReadAsync(key, StreamPosition.Beginning);
+
+            //assert
+            entries.Length.Should().Be(10);
+            for (var i = 0; i < 10; i++)
+            {
+                entries[i].Id.Should().Be(redisValues[i + 10]);
+            }
+        }
+        
+        [Test]
+        public async Task StreamReadAsync_WhenThreeValuesAddedToStreamAndThenOneReadThenTwo_ExpectThreeValuesReturnedWithContinuance()
+        {
+            //arrange
+            var options = ConfigurationOptions.Parse(RedisTestHost);
+            await using var conn = await ConnectionMultiplexer.ConnectAsync(options);
+            var db = conn.GetDatabase();
+            var key = GetUniqueKey();
+
+            var id1 = await db.StreamAddAsync(key, "field1", "value1");
+            var id2 = await db.StreamAddAsync(key, "field2", "value2");
+            var id3 = await db.StreamAddAsync(key, "field3", "value3");
+
+            //act
+            var firstReadEntries = await db.StreamReadAsync(key, StreamPosition.Beginning, 1);
+            var secondReadEntries = await db.StreamReadAsync(key, firstReadEntries[0].Id);
+
+            //assert
+            firstReadEntries.Length.Should().Be(1);
+            secondReadEntries.Length.Should().Be(2);
+            firstReadEntries[0].Id.Should().Be(id1);
+            secondReadEntries[0].Id.Should().Be(id2);
+            secondReadEntries[1].Id.Should().Be(id3);
+        }
+
+        private static RedisKey GetUniqueKey([CallerMemberName] string type = null) => $"{type}_StreamTest_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
 
         private static string Me([CallerFilePath] string filePath = null, [CallerMemberName] string caller = null) =>
             Environment.Version + "." + Path.GetFileNameWithoutExtension(filePath) + "-" + caller;
